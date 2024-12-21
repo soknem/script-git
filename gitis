@@ -1,0 +1,170 @@
+#!/bin/bash
+
+# GitHub Personal Access Token
+# Read GitHub Personal Access Token from file
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Token file path relative to the script directory
+TOKEN_FILE="$SCRIPT_DIR/github_token.txt"
+
+if [ ! -f "$TOKEN_FILE" ]; then
+    echo "Token file not found: $TOKEN_FILE"
+    exit 1
+fi
+
+GITHUB_TOKEN=$(<"$TOKEN_FILE")
+# GitHub API URL
+GITHUB_API_URL="https://api.github.com/user/repos"
+
+# Function to prompt for confirmation
+confirm() {
+    while true; do
+        read -p "Do you want to execute the script? (y/n): " yn
+        case $yn in
+            [Yy]* ) return 0;;
+            [Nn]* ) return 1;;
+            * ) echo "Please answer yes or no.";;
+        esac
+    done
+}
+
+# Function to prompt for repository name until it's not empty or only spaces
+get_repo_name() {
+    while true; do
+        read -p "Enter repository name: " reponame
+
+        # Check if repository name is not empty or only spaces
+        if [ -n "$(echo -e "${reponame}" | sed -e 's/[[:space:]]//g')" ]; then
+            break
+        else
+            echo "Repository name cannot be empty or consist only of spaces. Please enter a valid name."
+        fi
+    done
+}
+
+# Function to prompt for repository visibility
+get_repo_visibility() {
+    while true; do
+        read -p "Do you want the repository to be private? (y/n, default is n): " visibility
+
+        # Set default to 'n' (public) if no input or blank
+        if [ -z "$visibility" ]; then
+            visibility="n"
+        fi
+
+        case $visibility in
+            [Yy]* ) repo_visibility="true"; break;;
+            [Nn]* ) repo_visibility="false"; break;;
+            * ) echo "Please answer 'y' for private or 'n' for public.";;
+        esac
+    done
+}
+
+# Function to create a GitHub repository using GitHub API
+create_github_repo() {
+    response=$(curl -s -w "%{http_code}" -X POST $GITHUB_API_URL \
+        -H "Authorization: token $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github.v3+json" \
+        -d "{\"name\":\"$reponame\", \"private\":$repo_visibility}")
+
+    # Extract HTTP status code from the response
+    http_code=$(echo "$response" | tail -n1)
+    response_body=$(echo "$response" | head -n -1)
+
+    if [ "$http_code" -eq 201 ]; then
+        echo "GitHub repository '$reponame' created successfully."
+        return 0
+    else
+        echo "Failed to create GitHub repository '$reponame'."
+        echo "Response: $response_body"
+        return 1
+    fi
+}
+
+# Function to delete the local Git repository
+delete_local_repo() {
+    echo "Deleting local Git repository..."
+    rm -rf .git
+    echo "Local Git repository deleted."
+}
+
+# Check if local Git repository exists
+if [ -d ".git" ]; then
+    echo "Local Git repository already exists. No further actions will be taken."
+    exit 0
+fi
+
+# Prompt user for confirmation
+while true; do
+    if confirm; then
+        break
+    else
+        echo "Script execution aborted."
+        exit 1
+    fi
+done
+
+# Prompt user for repository name
+get_repo_name
+
+# Append ".git" to repository name if not already included
+if [[ $reponame != *".git"* ]]; then
+    reponame="$reponame.git"
+fi
+
+# Prompt user for repository visibility
+get_repo_visibility
+
+# Create GitHub repository
+if create_github_repo; then
+    # Repository creation was successful, proceed with local setup
+
+    # Prompt user for branch name
+    read -p "Enter branch name (or press Enter for default 'main'): " branch
+
+    # Set default branch to "main" if input is empty or consists only of spaces
+    if [ -z "$branch" ] || [ -z "$(echo -e "${branch}" | sed -e 's/[[:space:]]//g')" ]; then
+        branch="main"
+    fi
+
+    # Prompt user for commit message
+    while true; do
+        echo -n "Enter commit message: "
+        read commit_message
+
+        # Remove leading and trailing whitespace
+        commit_message_trimmed="$(echo -e "${commit_message}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+        if [ -z "$commit_message_trimmed" ]; then
+            commit_message="Initialize commit"
+            break
+        else
+            commit_message="$commit_message_trimmed"
+            break
+        fi
+    done
+
+    # Initialize Git repository
+    git init
+
+    # Add all files to the staging area
+    git add .
+
+    # Commit changes
+    git commit -m "$commit_message"
+
+    # Add remote repository
+    git remote add origin "https://github.com/$(git config user.name)/$reponame"
+
+    # Rename the main branch
+    git branch -M $branch
+
+    # Push changes to remote repository
+    git push -u origin $branch
+
+    echo "Git initialization complete!"
+else
+    # Repository creation failed, clean up local Git repo
+    delete_local_repo
+    exit 1
+fi
