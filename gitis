@@ -2,10 +2,7 @@
 
 # GitHub Personal Access Token
 # Read GitHub Personal Access Token from file
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Token file path relative to the script directory
-TOKEN_FILE="$SCRIPT_DIR/github_token.txt"
+TOKEN_FILE="/c/script/github_token.txt"
 
 if [ ! -f "$TOKEN_FILE" ]; then
     echo "Token file not found: $TOKEN_FILE"
